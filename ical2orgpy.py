@@ -205,7 +205,10 @@ class Convertor(object):
                 fh_w.append(u"  {}--{}\n".format(
                     orgDatetime(comp_start, self.tz),
                     orgDatetime(comp_end, self.tz)))
-            else:  # all day event
+            elif (comp_start == comp_end - timedelta(days=1)):  # single day event
+                fh_w.append(u"  {}\n".format(
+                    orgDate(comp_start, self.tz)))
+            else:  # multiple day event
                 fh_w.append(u"  {}--{}\n".format(
                     orgDate(comp_start, self.tz),
                     orgDate(comp_end - timedelta(days=1), self.tz)))
