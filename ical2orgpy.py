@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 from __future__ import print_function
 from builtins import object
-import warnings
 import sys
 from dateutil.rrule import rrulestr, rruleset
 from math import floor
@@ -11,6 +10,7 @@ from pytz import timezone, utc, all_timezones
 from tzlocal import get_localzone
 import click
 import itertools
+import traceback
 
 
 def orgDatetime(dt, tz):
@@ -154,12 +154,13 @@ class Convertor(object):
 
     # Do not change anything below
 
-    def __init__(self, days=90, tz=None):
+    def __init__(self, days=90, tz=None, continue_on_error=False):
         """days: Window length in days (left & right from current time). Has
         to be positive.
         """
         self.tz = timezone(tz) if tz else get_localzone()
         self.days = days
+        self.continue_on_error = continue_on_error
 
     def __call__(self, fh, fh_w):
         try:
@@ -177,10 +178,13 @@ class Convertor(object):
         for comp in calendar.walk():
             try:
                 yield self.create_entry(comp, start, end)
-            except Exception as e:
-                msg = "Warning: an exception occured: %s" % e
-                warnings.warn(msg)
-                raise
+            except Exception:
+                print("Exception when processing:\n", file=sys.stderr)
+                print(comp.to_ical().decode('utf-8') + "\n", file=sys.stderr)
+                if self.continue_on_error:
+                    print(traceback.format_exc(), file=sys.stderr)
+                else:
+                    raise
 
     def create_entry(self, comp, start, end):
         event_iter = generate_event_iterator(comp, start, end, self.tz)
@@ -262,9 +266,15 @@ def print_timezones(ctx, param, value):
     default=None,
     callback=check_timezone,
     help="Timezone to use. (local timezone by default)")
+@click.option(
+    "--continue-on-error",
+    default=False,
+    is_flag=True,
+    help="Pass this to attempt to continue even if some events are not handled"
+)
 @click.argument("ics_file", type=click.File("r", encoding="utf-8"))
 @click.argument("org_file", type=click.File("w", encoding="utf-8"))
-def main(ics_file, org_file, days, timezone):
+def main(ics_file, org_file, days, timezone, continue_on_error):
     """Convert ICAL format into org-mode.
 
     Files can be set as explicit file name, or `-` for stdin or stdout::
@@ -277,7 +287,7 @@ def main(ics_file, org_file, days, timezone):
 
         $ cat in.ical | ical2orgpy - - > out.org
     """
-    convertor = Convertor(days, timezone)
+    convertor = Convertor(days, timezone, continue_on_error=continue_on_error)
     try:
         convertor(ics_file, org_file)
     except IcalParsingError as e:
