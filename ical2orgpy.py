@@ -89,7 +89,7 @@ class EventSingleIter(object):
         self.duration = self.ev_end - self.ev_start
         self.result = ()
         if (self.ev_start < timeframe_end and self.ev_end > timeframe_start):
-            self.result = (self.ev_start, self.ev_end, 0)
+            self.result = (self.ev_start, self.ev_end, False)
 
     def __iter__(self):
         return self
@@ -155,7 +155,7 @@ class EventRecur(object):
         if self.events:
             current = self.events.pop()
             return (current,
-                    current.tzinfo.normalize(current+self.duration),1)
+                    current.tzinfo.normalize(current+self.duration), True)
         raise StopIteration
 
 
