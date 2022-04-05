@@ -4,7 +4,7 @@ from builtins import object
 import sys
 from dateutil.rrule import rrulestr, rruleset
 from math import floor
-from datetime import date, datetime, timedelta, tzinfo
+from datetime import datetime, timedelta
 from icalendar import Calendar
 from pytz import timezone, utc, all_timezones
 from tzlocal import get_localzone
@@ -108,12 +108,15 @@ class EventRecur(object):
     '''Iterator for daily-based recurring events (daily, weekly).'''
 
     def __init__(self, comp, timeframe_start, timeframe_end, tz):
-        self.ev_start = get_datetime(comp['DTSTART'].dt, tz)
-        if "DTEND" not in comp:
-            self.ev_end = self.ev_start
-        else:
-            self.ev_end = get_datetime(comp['DTEND'].dt, tz)
-        self.duration = self.ev_end - self.ev_start
+        # We must leave DTSTART as they are in terms of timezone, because
+        # it must match UNTIL and rrulestr enforces this.
+        self.ev_start = comp['DTSTART'].dt
+        if "DTEND" in comp:
+            self.ev_end = comp['DTEND'].dt
+            self.duration = self.ev_end - self.ev_start
+        elif "DURATION" in comp:
+            self.duration = comp["DURATION"].dt
+            self.ev_end = self.ev_start + self.duration
 
         self.recurrences = rrulestr(
             comp["RRULE"].to_ical().decode("utf-8"), dtstart=self.ev_start)
@@ -132,7 +135,18 @@ class EventRecur(object):
             for skip in self.exclude:
                 self.rules.exdate(skip)
 
-        self.events = self.rules.between(timeframe_start, timeframe_end)
+        if (not hasattr(self.ev_start, 'tzinfo') or self.ev_start.tzinfo is None):
+            # if DTSTART has no timezone, then the date/datetime objects in
+            # rules won't either, and such objects can't be compared to
+            # datetimes that do have timezones. So we have to remove, compare,
+            # then re-add.
+            self.events = [
+                e.replace(tzinfo=tz)
+                for e in self.rules.between(timeframe_start.replace(tzinfo=None),
+                                            timeframe_end.replace(tzinfo=None))
+            ]
+        else:
+            self.events = self.rules.between(timeframe_start, timeframe_end)
 
     def __iter__(self):
         return self
