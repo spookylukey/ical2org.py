@@ -153,7 +153,7 @@ class EventRecur(object):
 
     def __next__(self):
         if self.events:
-            current = self.events.pop()
+            current = self.events.pop(0)
             return (current,
                     current.tzinfo.normalize(current+self.duration), True)
         raise StopIteration
