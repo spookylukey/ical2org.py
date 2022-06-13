@@ -54,7 +54,6 @@ def advance_just_before(start_dt, timeframe_start, delta_days):
     '''Advance an start_dt datetime to the first date just before
     timeframe_start. Use delta_days for advancing the event. Precond:
     start_dt < timeframe_start'''
-    delta = timedelta(days=delta_days)
     delta_ord = floor(
         (timeframe_start.toordinal() - start_dt.toordinal() - 1) / delta_days)
     return (add_delta_dst(start_dt,
