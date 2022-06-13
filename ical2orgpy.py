@@ -79,12 +79,13 @@ class EventSingleIter(object):
     def __init__(self, comp, timeframe_start, timeframe_end, tz):
         self.ev_start = get_datetime(comp['DTSTART'].dt, tz)
 
-        # Events with the same begin/end time same do not include
-        # "DTEND".
-        if "DTEND" not in comp:
-            self.ev_end = self.ev_start
-        else:
+        if "DTEND" in comp:
             self.ev_end = get_datetime(comp['DTEND'].dt, tz)
+        elif "DURATION" in comp:
+            self.duration = comp["DURATION"].dt
+            self.ev_end = self.ev_start + self.duration
+        else:
+            self.ev_end = self.ev_start
 
         self.duration = self.ev_end - self.ev_start
         self.result = ()
