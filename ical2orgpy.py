@@ -1,162 +1,28 @@
 #!/usr/bin/env python
 from __future__ import print_function
-from builtins import object
+
 import sys
-from dateutil.rrule import rrulestr, rruleset
-from math import floor
-from datetime import datetime, timedelta
-from icalendar import Calendar
-from pytz import timezone, utc, all_timezones
-from tzlocal import get_localzone
-import click
-import itertools
 import traceback
+from builtins import object
+from datetime import date, datetime, timedelta
+
+import click
+import recurring_ical_events
+from icalendar import Calendar
+from pytz import all_timezones, timezone, utc
+from tzlocal import get_localzone
 
 
 def orgDatetime(dt, tz):
-    '''Timezone aware datetime to YYYY-MM-DD DayofWeek HH:MM str in localtime.
-    '''
+    """Timezone aware datetime to YYYY-MM-DD DayofWeek HH:MM str in localtime."""
     return dt.astimezone(tz).strftime("<%Y-%m-%d %a %H:%M>")
 
 
 def orgDate(dt, tz):
-    '''Timezone aware date to YYYY-MM-DD DayofWeek in localtime.
-    '''
-    return dt.astimezone(tz).strftime("<%Y-%m-%d %a>")
-
-
-def get_datetime(dt, tz):
-    '''Convert date or datetime to local datetime.
-    '''
-    if isinstance(dt, datetime):
-        if not dt.tzinfo:
-            return dt.replace(tzinfo=tz)
-        return dt
-    else:
-        # d is date. Being a naive date, let's suppose it is in local
-        # timezone.  Unfortunately using the tzinfo argument of the standard
-        # datetime constructors ''does not work'' with pytz for many
-        # timezones, so create first a utc datetime, and convert to local
-        # timezone
-        aux_dt = datetime(year=dt.year, month=dt.month, day=dt.day, tzinfo=utc)
-        return aux_dt.astimezone(tz)
-
-
-def add_delta_dst(dt, delta):
-    '''Add a timedelta to a datetime, adjusting DST when appropriate'''
-    # convert datetime to naive, add delta and convert again to his own
-    # timezone
-    naive_dt = dt.replace(tzinfo=None)
-    return dt.tzinfo.localize(naive_dt + delta)
-
-
-def advance_just_before(start_dt, timeframe_start, delta_days):
-    '''Advance an start_dt datetime to the first date just before
-    timeframe_start. Use delta_days for advancing the event. Precond:
-    start_dt < timeframe_start'''
-    delta_ord = floor(
-        (timeframe_start.toordinal() - start_dt.toordinal() - 1) / delta_days)
-    return (add_delta_dst(start_dt,
-                          timedelta(days=delta_days * int(delta_ord))),
-            int(delta_ord))
-
-
-def generate_event_iterator(comp, timeframe_start, timeframe_end, tz):
-    '''Get iterator with the proper delta (days, weeks, etc)'''
-    # Note: timeframe_start and timeframe_end are in UTC
-    if comp.name != 'VEVENT':
-        return []
-    if 'RRULE' in comp:
-        return EventRecur(comp, timeframe_start, timeframe_end, tz)
-
-    return EventSingleIter(comp, timeframe_start, timeframe_end, tz)
-
-
-class EventSingleIter(object):
-    '''Iterator for non-recurring single events.'''
-
-    def __init__(self, comp, timeframe_start, timeframe_end, tz):
-        self.ev_start = get_datetime(comp['DTSTART'].dt, tz)
-
-        if "DTEND" in comp:
-            self.ev_end = get_datetime(comp['DTEND'].dt, tz)
-        elif "DURATION" in comp:
-            self.duration = comp["DURATION"].dt
-            self.ev_end = self.ev_start + self.duration
-        else:
-            self.ev_end = self.ev_start
-
-        self.duration = self.ev_end - self.ev_start
-        self.result = ()
-        if (self.ev_start < timeframe_end and self.ev_end > timeframe_start):
-            self.result = (self.ev_start, self.ev_end, False)
-
-    def __iter__(self):
-        return self
-
-    # Iterate just once
-    def __next__(self):
-        if self.result:
-            aux = self.result
-            self.result = ()
-        else:
-            raise StopIteration
-        return aux
-
-
-class EventRecur(object):
-    '''Iterator for daily-based recurring events (daily, weekly).'''
-
-    def __init__(self, comp, timeframe_start, timeframe_end, tz):
-        # We must leave DTSTART as they are in terms of timezone, because
-        # it must match UNTIL and rrulestr enforces this.
-        self.ev_start = comp['DTSTART'].dt
-        if "DTEND" in comp:
-            self.ev_end = comp['DTEND'].dt
-            self.duration = self.ev_end - self.ev_start
-        elif "DURATION" in comp:
-            self.duration = comp["DURATION"].dt
-            self.ev_end = self.ev_start + self.duration
-
-        self.recurrences = rrulestr(
-            comp["RRULE"].to_ical().decode("utf-8"), dtstart=self.ev_start)
-        self.rules = rruleset()
-        self.rules.rrule(self.recurrences)
-
-        self.exclude = set()
-        if 'EXDATE' in comp:
-            exdate = comp['EXDATE']
-            if isinstance(exdate, list):
-                exdate = itertools.chain.from_iterable([e.dts for e in exdate])
-            else:
-                exdate = exdate.dts
-            self.exclude = set([get_datetime(dt.dt, tz) for dt in exdate])
-
-            for skip in self.exclude:
-                self.rules.exdate(skip)
-
-        if (not hasattr(self.ev_start, 'tzinfo') or self.ev_start.tzinfo is None):
-            # if DTSTART has no timezone, then the date/datetime objects in
-            # rules won't either, and such objects can't be compared to
-            # datetimes that do have timezones. So we have to remove, compare,
-            # then re-add.
-            self.events = [
-                e.replace(tzinfo=tz)
-                for e in self.rules.between(timeframe_start.replace(tzinfo=None),
-                                            timeframe_end.replace(tzinfo=None))
-            ]
-        else:
-            self.events = self.rules.between(timeframe_start, timeframe_end)
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.events:
-            current = self.events.pop(0)
-            return (current,
-                    current.tzinfo.normalize(current+self.duration), True)
-        raise StopIteration
+    """Timezone aware date to YYYY-MM-DD DayofWeek in localtime."""
+    if hasattr(dt, "astimezone"):
+        dt = dt.astimezone(tz)
+    return dt.strftime("<%Y-%m-%d %a>")
 
 
 class IcalParsingError(Exception):
@@ -189,54 +55,75 @@ class Convertor(object):
         now = datetime.now(utc)
         start = now - timedelta(days=self.days)
         end = now + timedelta(days=self.days)
-        for comp in calendar.walk():
+        for comp in recurring_ical_events.of(
+            calendar, keep_recurrence_attributes=True
+        ).between(start, end):
             try:
-                yield self.create_entry(comp, start, end)
+                yield self.create_entry(comp)
             except Exception:
                 print("Exception when processing:\n", file=sys.stderr)
-                print(comp.to_ical().decode('utf-8') + "\n", file=sys.stderr)
+                print(comp.to_ical().decode("utf-8") + "\n", file=sys.stderr)
                 if self.continue_on_error:
                     print(traceback.format_exc(), file=sys.stderr)
                 else:
                     raise
 
-    def create_entry(self, comp, start, end):
-        event_iter = generate_event_iterator(comp, start, end, self.tz)
+    def create_entry(self, comp):
         fh_w = []
-        for comp_start, comp_end, rec_event in event_iter:
-            summary = ""
-            if "SUMMARY" in comp:
-                summary = comp['SUMMARY'].to_ical().decode("utf-8")
-                summary = summary.replace('\\,', ',')
-            location = ""
-            if "LOCATION" in comp:
-                location = comp['LOCATION'].to_ical().decode("utf-8")
-                location = location.replace('\\,', ',')
-            if not any((summary, location)):
-                summary = u"(No title)"
-            else:
-                summary += " - " + location if location else ''
-            tag = rec_event and self.RECUR_TAG or ''
-            fh_w.append(u"* {}{}\n".format(summary, tag))
+        summary = ""
+        if "SUMMARY" in comp:
+            summary = comp["SUMMARY"].to_ical().decode("utf-8")
+            summary = summary.replace("\\,", ",")
+        location = ""
+        if "LOCATION" in comp:
+            location = comp["LOCATION"].to_ical().decode("utf-8")
+            location = location.replace("\\,", ",")
+        if not any((summary, location)):
+            summary = "(No title)"
+        else:
+            summary += " - " + location if location else ""
+        tag = "RRULE" in comp and self.RECUR_TAG or ""
+        fh_w.append("* {}{}\n".format(summary, tag))
 
-            if isinstance(comp["DTSTART"].dt, datetime):
-                fh_w.append(u"  {}--{}\n".format(
-                    orgDatetime(comp_start, self.tz),
-                    orgDatetime(comp_end, self.tz)))
-            elif (comp_start == comp_end - timedelta(days=1)):  # single day event
-                fh_w.append(u"  {}\n".format(
-                    orgDate(comp_start, self.tz)))
+        ev_start = None
+        if "DTSTART" in comp:
+            ev_start = comp["DTSTART"].dt
+
+        ev_end = None
+        duration = None
+        if "DTEND" in comp:
+            ev_end = comp["DTEND"].dt
+            if ev_start is not None:
+                duration = ev_end - ev_start
+        elif "DURATION" in comp:
+            duration = comp["DURATION"].dt
+            if ev_start is not None:
+                ev_end = ev_start + duration
+
+        if isinstance(ev_start, datetime):
+            fh_w.append(
+                "  {}--{}\n".format(
+                    orgDatetime(ev_start, self.tz), orgDatetime(ev_end, self.tz)
+                )
+            )
+        elif isinstance(ev_start, date):
+            if ev_start == ev_end - timedelta(days=1):  # single day event
+                fh_w.append("  {}\n".format(orgDate(ev_start, self.tz)))
             else:  # multiple day event
-                fh_w.append(u"  {}--{}\n".format(
-                    orgDate(comp_start, self.tz),
-                    orgDate(comp_end - timedelta(days=1), self.tz)))
-            if 'DESCRIPTION' in comp:
-                description = '\n'.join(
-                    comp['DESCRIPTION'].to_ical().decode("utf-8").split('\\n'))
-                description = description.replace('\\,', ',')
-                fh_w.append(u"{}\n".format(description))
+                fh_w.append(
+                    "  {}--{}\n".format(
+                        orgDate(ev_start, self.tz),
+                        orgDate(ev_end - timedelta(days=1), self.tz),
+                    )
+                )
+        if "DESCRIPTION" in comp:
+            description = "\n".join(
+                comp["DESCRIPTION"].to_ical().decode("utf-8").split("\\n")
+            )
+            description = description.replace("\\,", ",")
+            fh_w.append("{}\n".format(description))
 
-            fh_w.append(u"\n")
+        fh_w.append("\n")
 
         return "".join(fh_w)
 
@@ -245,8 +132,8 @@ def check_timezone(ctx, param, value):
     if (value is None) or (value in all_timezones):
         return value
     else:
-        click.echo(u"Invalid timezone value {value}.".format(value=value))
-        click.echo(u"Use --print-timezones to show acceptable values.")
+        click.echo("Invalid timezone value {value}.".format(value=value))
+        click.echo("Use --print-timezones to show acceptable values.")
         ctx.exit(1)
 
 
@@ -258,7 +145,7 @@ def print_timezones(ctx, param, value):
     ctx.exit()
 
 
-@click.command(context_settings={"help_option_names": ['-h', '--help']})
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "--print-timezones",
     "-p",
@@ -266,25 +153,29 @@ def print_timezones(ctx, param, value):
     callback=print_timezones,
     is_eager=True,
     expose_value=False,
-    help="Print acceptable timezone names and exit.")
+    help="Print acceptable timezone names and exit.",
+)
 @click.option(
     "--days",
     "-d",
     default=90,
     type=click.IntRange(0, clamp=True),
-    help=("Window length in days (left & right from current time). "
-          "Has to be positive."))
+    help=(
+        "Window length in days (left & right from current time). " "Has to be positive."
+    ),
+)
 @click.option(
     "--timezone",
     "-t",
     default=None,
     callback=check_timezone,
-    help="Timezone to use. (local timezone by default)")
+    help="Timezone to use. (local timezone by default)",
+)
 @click.option(
     "--continue-on-error",
     default=False,
     is_flag=True,
-    help="Pass this to attempt to continue even if some events are not handled"
+    help="Pass this to attempt to continue even if some events are not handled",
 )
 @click.argument("ics_file", type=click.File("r", encoding="utf-8"))
 @click.argument("org_file", type=click.File("w", encoding="utf-8"))
